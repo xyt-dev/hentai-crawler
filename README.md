@@ -2,7 +2,7 @@
 
 > [中文文档](README.zh.md)
 
-A fast, async Rust CLI tool that downloads an entire gallery from [ehentai.to](https://ehentai.to), converts all images to PNG, and packages them into a `.cbz` file ready for any comic reader.
+A fast, async Rust CLI tool that uses a **4-stage pipeline** to scrape, download, convert, and pack an entire gallery from [ehentai.to](https://ehentai.to) — all four stages running simultaneously — producing a `.cbz` file ready for any comic reader.
 
 ## Features
 

@@ -2,7 +2,7 @@
 
 > [English README](README.md)
 
-一个基于 Rust 异步编写的命令行工具，可自动爬取 [ehentai.to](https://ehentai.to) 上的完整漫画，将所有图片转换为 PNG 格式，并打包为 `.cbz` 文件，可直接用漫画阅读器打开。
+一个基于 Rust 异步编写的命令行工具，采用 **四阶段流水线技术**，将抓取、下载、转换、打包同时并行推进，自动爬取 [ehentai.to](https://ehentai.to) 上的完整漫画并输出 `.cbz` 文件，可直接用漫画阅读器打开。
 
 ## 功能特性
 

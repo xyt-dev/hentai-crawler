@@ -2,17 +2,19 @@
 
 > [中文文档](README.zh.md)
 
-A fast, async Rust CLI tool that uses a **4-stage pipeline** to scrape, download, convert, and pack an entire gallery from [ehentai.to](https://ehentai.to) — all four stages running simultaneously — producing a `.cbz` file ready for any comic reader.
+A fast, async Rust CLI tool that uses a **4-stage pipeline** to scrape, download, convert, and pack an entire gallery from [ehentai.to](https://ehentai.to) or [e-hentai.org](https://e-hentai.org) — all four stages running simultaneously — producing a `.cbz` file ready for any comic reader.
 
 ## Features
 
-- Accepts gallery ID, gallery URL, or viewer page URL as input
-- Automatically detects total page count
-- **Pipeline architecture** — scraping, downloading, PNG conversion, and CBZ packing all run concurrently and overlap with each other, so no stage has to wait for the previous one to fully finish. Your urgent needs, met at full speed.
+- Supports both **ehentai.to** and **e-hentai.org**
+- Accepts gallery URL or viewer page URL as input
+- Automatically detects total page count and handles paginated gallery listings
+- **Pipeline architecture** — scraping, downloading, PNG conversion, and CBZ packing all run concurrently and overlap with each other, so no stage has to wait for the previous one to fully finish
 - Concurrent downloads and page scraping with configurable parallelism (defaults to all logical CPUs)
 - Converts any image format (WebP, JPEG, GIF, etc.) to PNG using the blocking thread pool, saturating all CPU cores
 - Four real-time progress bars, one per pipeline stage
 - Interactive shell mode — run without arguments to download multiple galleries in one session
+- Optional cookie authentication for e-hentai.org
 
 ## Pipeline
 
@@ -38,20 +40,17 @@ cargo build --release
 ### Usage
 
 ```bash
-# By gallery ID
-./target/release/ehentai-crawler 623223
+# ehentai.to
+./target/release/ehentai-crawler "https://ehentai.to/g/<id>"
+./target/release/ehentai-crawler "https://ehentai.to/g/<id>/<page>/"
 
-# By gallery URL
-./target/release/ehentai-crawler "https://ehentai.to/g/623223"
-
-# By viewer page URL
-./target/release/ehentai-crawler "https://ehentai.to/g/623223/1/"
+# e-hentai.org
+./target/release/ehentai-crawler "https://e-hentai.org/g/<id>/<token>/"
+./target/release/ehentai-crawler "https://e-hentai.org/g/<id>/<token>/<page>/"
 
 # Interactive shell mode (no arguments)
 ./target/release/ehentai-crawler
 ```
-
-All URL forms are equivalent. Output: `623223.cbz` in the current directory.
 
 ### Options
 
@@ -59,11 +58,13 @@ All URL forms are equivalent. Output: `623223.cbz` in the current directory.
 Usage: ehentai-crawler [OPTIONS] [URL]
 
 Arguments:
-  [URL]  Gallery ID or URL (omit to enter interactive mode)
+  [URL]  Gallery URL (omit to enter interactive mode)
 
 Options:
   -o, --output <OUTPUT>          Output directory [default: .]
   -c, --concurrency <N>          Concurrent downloads [default: logical CPU count]
+      --cookies <COOKIES>        Cookie string for e-hentai.org authentication
+                                 e.g. "ipb_member_id=123; ipb_pass_hash=abc; igneous=xyz"
   -h, --help                     Print help
   -V, --version                  Print version
 ```
@@ -71,18 +72,27 @@ Options:
 ### Example
 
 ```bash
-./target/release/ehentai-crawler 623223 -o ~/Downloads
+./target/release/ehentai-crawler "https://e-hentai.org/g/<id>/<token>/" -o ~/Downloads
 ```
 
 ```
 Fetching gallery info...
-Gallery ID: 623223  |  Total pages: 47
-⠸ scraping  [=====================================>-] 46/47 (1s)
-⠼ download  [=================================>-----] 40/47 (2s)
-⠴ convert   [===========================>-----------] 34/47 (3s)
-⠦ packing   [======================>----------------] 28/47 (3s)
-Saved to: /home/user/Downloads/623223.cbz
+Gallery: <title>  |  Total pages: <N>
+⠸ scraping  [=====================================>-] 56/60 (1s)
+⠼ download  [=================================>-----] 57/60 (2s)
+⠴ convert   [===========================>-----------] 58/60 (3s)
+⠦ packing   [======================>----------------] 59/60 (3s)
+Saved to: /home/user/Downloads/<id>.cbz
 ```
+
+## Supported URL Formats
+
+| Site | Format |
+|------|--------|
+| ehentai.to | `https://ehentai.to/g/<id>` |
+| ehentai.to | `https://ehentai.to/g/<id>/<page>/` |
+| e-hentai.org | `https://e-hentai.org/g/<id>/<token>/` |
+| e-hentai.org | `https://e-hentai.org/g/<id>/<token>/<page>/` |
 
 ## Requirements
 

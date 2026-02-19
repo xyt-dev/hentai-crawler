@@ -22,7 +22,7 @@ A fast, async Rust CLI tool that uses a **4-stage pipeline** to scrape, download
 Stage 1 [scraping]  ████████░░░░░░░░░░░░░░░░░░
 Stage 2 [download]    ░░░░████████████░░░░░░░░
 Stage 3 [convert]         ░░░░░░░████████████░
-Stage 4 [packing]               ░░░░░░░░░████
+Stage 4 [packing]               ░░░░░░░░░░████
 ```
 
 Each stage feeds the next via a bounded channel. As soon as an image URL is found it starts downloading; as soon as raw bytes arrive they are converted; no waiting for the whole gallery to finish each phase.

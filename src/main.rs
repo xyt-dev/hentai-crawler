@@ -126,6 +126,17 @@ fn ehto_extract_num_pages(html: &str) -> Result<u32> {
     Ok(caps[1].parse()?)
 }
 
+fn ehto_extract_title(html: &str) -> Option<String> {
+    // JS data contains: "title": { "english": "...", "japanese": "..." }
+    let re = Regex::new(r#""title"\s*:\s*\{[^}]*"english"\s*:\s*"([^"]+)""#).ok()?;
+    if let Some(caps) = re.captures(html) {
+        return Some(caps[1].to_string());
+    }
+    // Fallback: japanese title
+    let re_jp = Regex::new(r#""title"\s*:\s*\{[^}]*"japanese"\s*:\s*"([^"]+)""#).ok()?;
+    re_jp.captures(html).map(|caps| caps[1].to_string())
+}
+
 // ── e-hentai.org helpers ──────────────────────────────────────────────────────
 
 /// Information extracted from the e-hentai.org gallery page.
@@ -340,7 +351,7 @@ async fn crawl(input: &str, output: &PathBuf, concurrency: usize, client: Arc<Cl
     // ── Bootstrap: get num_pages and build the (page, viewer_url) list ────────
     println!("Fetching gallery info...");
 
-    let (gallery_id, num_pages, title, viewer_items): (String, u32, String, Vec<(u32, String)>) =
+    let (_gallery_id, num_pages, title, viewer_items): (String, u32, String, Vec<(u32, String)>) =
         match &site {
             Site::EhentaiTo { base, gallery_id } => {
                 let p1_url = ehto_page_url(base, gallery_id, 1);
@@ -375,7 +386,9 @@ async fn crawl(input: &str, output: &PathBuf, concurrency: usize, client: Arc<Cl
                 for page in 2..=num_pages {
                     items.push((page, ehto_page_url(base, gallery_id, page)));
                 }
-                (gallery_id.clone(), num_pages, gallery_id.clone(), items)
+                let title = ehto_extract_title(&p1_html)
+                    .unwrap_or_else(|| gallery_id.clone());
+                (gallery_id.clone(), num_pages, title, items)
             }
 
             Site::EHentaiOrg { gallery_id, token } => {
@@ -512,7 +525,13 @@ async fn crawl(input: &str, output: &PathBuf, concurrency: usize, client: Arc<Cl
     });
 
     // ── Stage 4: Collect & write CBZ ──────────────────────────────────────────
-    let cbz_name = format!("{}.cbz", gallery_id);
+    // Sanitize title for use as a filename: replace characters not allowed on
+    // common filesystems (Windows/Linux) with underscores.
+    let safe_title: String = title.chars().map(|c| match c {
+        '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+        c => c,
+    }).collect();
+    let cbz_name = format!("{}.cbz", safe_title);
     let cbz_path = output.join(&cbz_name);
     let file = std::fs::File::create(&cbz_path)
         .with_context(|| format!("Cannot create {}", cbz_path.display()))?;

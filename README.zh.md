@@ -1,4 +1,4 @@
-# ehentai-crawler
+# hentai-crawler
 
 > [English README](README.md)
 

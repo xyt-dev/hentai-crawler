@@ -1,4 +1,4 @@
-# ehentai-crawler
+# hentai-crawler
 
 > [中文文档](README.zh.md)
 

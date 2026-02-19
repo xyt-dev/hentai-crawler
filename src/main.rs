@@ -7,6 +7,7 @@ use reqwest::Client;
 use scraper::{Html, Selector};
 use std::io::Write as IoWrite;
 use std::path::PathBuf;
+use std::sync::Arc;
 use zip::{ZipWriter, write::SimpleFileOptions};
 
 /// ehentai.to manga crawler - downloads all pages and packs into a .cbz file
@@ -14,7 +15,8 @@ use zip::{ZipWriter, write::SimpleFileOptions};
 #[command(author, version, about)]
 struct Args {
     /// Gallery ID or URL (e.g. 623223, https://ehentai.to/g/623223, https://ehentai.to/g/623223/1/)
-    url: String,
+    /// Omit to enter interactive shell mode.
+    url: Option<String>,
 
     /// Output directory for the .cbz file
     #[arg(short, long, default_value = ".")]
@@ -72,7 +74,6 @@ async fn fetch_image_url(client: &Client, url: &str) -> Result<String> {
 
     let doc = Html::parse_document(&html);
 
-    // Try #image-container img first
     let sel = Selector::parse("#image-container img").unwrap();
     if let Some(el) = doc.select(&sel).next() {
         if let Some(src) = el.value().attr("src") {
@@ -80,7 +81,6 @@ async fn fetch_image_url(client: &Client, url: &str) -> Result<String> {
         }
     }
 
-    // Fallback: search for num_pages in embedded JS to confirm we're on a valid page
     if html.contains("num_pages") {
         anyhow::bail!("Found JS data but no <img> in #image-container on page: {url}");
     }
@@ -114,14 +114,12 @@ async fn download_image(client: &Client, url: &str) -> Result<bytes::Bytes> {
 
 /// Convert raw image bytes to PNG bytes. Returns original bytes if already PNG.
 fn to_png(data: &[u8]) -> Result<Vec<u8>> {
-    // Detect format
     let format = image::guess_format(data).unwrap_or(ImageFormat::WebP);
     if format == ImageFormat::Png {
         return Ok(data.to_vec());
     }
 
-    let img = image::load_from_memory(data)
-        .with_context(|| "Failed to decode image")?;
+    let img = image::load_from_memory(data).with_context(|| "Failed to decode image")?;
 
     let mut buf = Vec::new();
     img.write_to(&mut std::io::Cursor::new(&mut buf), ImageFormat::Png)
@@ -129,18 +127,12 @@ fn to_png(data: &[u8]) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
-
-    let (base, gallery_id) = parse_gallery_url(&args.url)?;
-
-    let client = Client::builder()
-        .user_agent("Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0")
-        .build()?;
+/// Core crawl logic. Shared between CLI and interactive modes.
+async fn crawl(input: &str, output: &PathBuf, concurrency: usize, client: Arc<Client>) -> Result<()> {
+    let (base, gallery_id) = parse_gallery_url(input)?;
 
     // --- Step 1: Fetch page 1 to get num_pages ---
-    println!("Fetching gallery info from page 1...");
+    println!("Fetching gallery info...");
     let p1_url = page_url(&base, &gallery_id, 1);
     let p1_html = client
         .get(&p1_url)
@@ -153,7 +145,6 @@ async fn main() -> Result<()> {
     let num_pages = extract_num_pages(&p1_html)?;
     println!("Gallery ID: {gallery_id}  |  Total pages: {num_pages}");
 
-    // Extract image URL from page 1's HTML directly (avoid double fetch)
     let p1_img_url = {
         let doc = Html::parse_document(&p1_html);
         let sel = Selector::parse("#image-container img").unwrap();
@@ -173,13 +164,9 @@ async fn main() -> Result<()> {
         .progress_chars("=>-"),
     );
 
-    // We already have page 1 image URL; fetch the rest
-    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(args.concurrency));
-    let client = std::sync::Arc::new(client);
-
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
     let mut tasks = Vec::new();
 
-    // Page 1 is already resolved
     tasks.push(tokio::spawn({
         let pb = pb.clone();
         async move {
@@ -207,8 +194,7 @@ async fn main() -> Result<()> {
         let result = task.await.context("Task panicked")??;
         page_img_urls.push(result);
     }
-    pb.finish_with_message("Page URLs collected");
-
+    pb.finish_with_message("done");
     page_img_urls.sort_by_key(|(page, _)| *page);
 
     // --- Step 3: Download images concurrently ---
@@ -222,9 +208,9 @@ async fn main() -> Result<()> {
         .progress_chars("=>-"),
     );
 
-    let semaphore2 = std::sync::Arc::new(tokio::sync::Semaphore::new(args.concurrency));
-
+    let semaphore2 = Arc::new(tokio::sync::Semaphore::new(concurrency));
     let mut dl_tasks = Vec::new();
+
     for (page, img_url) in page_img_urls {
         let client = client.clone();
         let sem = semaphore2.clone();
@@ -243,13 +229,12 @@ async fn main() -> Result<()> {
         let result = task.await.context("Download task panicked")??;
         images.push(result);
     }
-    pb2.finish_with_message("Images downloaded");
-
+    pb2.finish_with_message("done");
     images.sort_by_key(|(page, _)| *page);
 
     // --- Step 4: Convert to PNG and pack into .cbz ---
     let cbz_name = format!("{}.cbz", gallery_id);
-    let cbz_path = args.output.join(&cbz_name);
+    let cbz_path = output.join(&cbz_name);
     println!("Packing into {}...", cbz_path.display());
 
     let file = std::fs::File::create(&cbz_path)
@@ -266,7 +251,53 @@ async fn main() -> Result<()> {
     }
 
     zip.finish()?;
-    println!("Done! Saved to: {}", cbz_path.display());
+    println!("Done! Saved to: {}\n", cbz_path.display());
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+
+    let client = Arc::new(
+        Client::builder()
+            .user_agent("Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0")
+            .build()?,
+    );
+
+    if let Some(url) = args.url {
+        // CLI mode: single gallery
+        crawl(&url, &args.output, args.concurrency, client).await?;
+    } else {
+        // Interactive shell mode
+        println!("ehentai-crawler interactive mode");
+        println!("Enter a gallery ID or URL to download. Type 'quit' or 'exit' to quit.\n");
+
+        loop {
+            print!("gallery> ");
+            std::io::stdout().flush()?;
+
+            let mut line = String::new();
+            if std::io::stdin().read_line(&mut line)? == 0 {
+                // EOF (Ctrl+D)
+                break;
+            }
+
+            let input = line.trim();
+            if input.is_empty() {
+                continue;
+            }
+            if input == "quit" || input == "exit" {
+                println!("Bye!");
+                break;
+            }
+
+            if let Err(e) = crawl(input, &args.output, args.concurrency, client.clone()).await {
+                eprintln!("Error: {e:#}\n");
+            }
+        }
+    }
 
     Ok(())
 }
